@@ -5,6 +5,7 @@ interface InternalVariable<T extends VariableType> {
 }
 
 interface InternalEntity {
+  key: string;
   name: string;
 }
 
@@ -26,10 +27,10 @@ export declare interface Service extends InternalEntity {
 
 type SyncOrAsync<T> = T | Promise<T>;
 
-type ResolverAvailableTypes = string | string[] | undefined;
+export type ResolverAvailableTypes = string | string[] | undefined;
 
 export declare type ResolverArgs = Record<string, ResolverAvailableTypes>;
 
 export declare type Resolver = (
   context: ResolverArgs[]
-) => SyncOrAsync<ResolverAvailableTypes[]>;
+) => SyncOrAsync<Record<string, ResolverAvailableTypes>[]>;

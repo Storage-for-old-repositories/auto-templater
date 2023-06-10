@@ -5,6 +5,7 @@
  * @typedef { import('./types').VariableConst } VariableConst
  * @typedef { import('./types').Resolver } ResolverCallback
  * @typedef { import('./types').ResolverArgs } ResolverArgs
+ * @typedef { import('./types').ResolverAvailableTypes } ResolverAvailableTypes
  */
 
 class TemplaterError extends Error {}
@@ -40,20 +41,21 @@ class ResolverContext {
   }
 
   /**
-   * @param { string } name
+   * @param { string } key
    * @param { VariableRef | VariableConst } variable
    */
-  registVariable(name, variable) {
-    this.variables.set(name, variable);
+  registVariable(key, variable) {
+    this.variables.set(key, variable);
   }
 
   /**
-   * @param { string } name
+   * @param { string } key
    * @param { string } providerName
    * @param { Dependency[] } dependencies
    */
-  registService(name, providerName, dependencies) {
-    this.services.set(name, {
+  registService(key, providerName, dependencies) {
+    this.services.set(key, {
+      key,
       name: providerName,
       dependencies,
     });
@@ -219,10 +221,11 @@ class Parser {
       .split(";")
       .slice(0, -1) /** ["a = b", "c = d", ""] -> ["a = b", "c = d"] */
       .map((assign) => {
-        const [name, value] = assign.split("=").map((t) => t.trim());
+        const [key, value] = assign.split("=").map((t) => t.trim());
         /** @type { Dependency } */
         const dependency = {
-          name,
+          key: key,
+          name: key,
           variableName: value.slice(1),
         };
         return dependency;
@@ -285,6 +288,124 @@ class Parser {
   }
 }
 
+/**
+ * @typedef { Record<string, ResolverAvailableTypes> } Arguments
+ *
+ * @typedef Context
+ * @type { object }
+ * @property { Arguments } [args=undefined]
+ */
+
+/**
+ * @param { Context } [context=undefined]
+ */
+
+class ResolverExecutor {
+  /**
+   * @typedef QueueResolving
+   * @type { object }
+   * @property { Service[] } queue
+   * @property { Record<keyof Service, Service[]> } queueGrouped
+   */
+
+  /**
+   * @param { object } props
+   * @param { Map<string, ResolverValue> } props.resolvers
+   * @param { ResolverContext } props.context
+   * @param { Record<string, ResolverAvailableTypes> } props.variableBase
+   * @param { Map<string, Record<string, string>> } props.serviceModels
+   * @param { QueueResolving[] } props.queueResolving
+   */
+  constructor({
+    resolvers,
+    context,
+    variableBase,
+    serviceModels,
+    queueResolving,
+  }) {
+    this._resolvers = resolvers;
+    this._context = context;
+    this._variableBase = variableBase;
+    this._serviceModels = serviceModels;
+    this._queueResolving = queueResolving;
+  }
+
+  /**
+   * @param { Context } [context=undefined]
+   */
+  async execute(context = {}) {
+    const { args = {} } = context || {};
+
+    /** @type { Record<string, ResolverAvailableTypes> } */
+    const variable = {
+      ...this._variableBase,
+      ...args,
+    };
+
+    if (this._queueResolving.length > 0) {
+      let currentQueue = new Set(this._queueResolving[0].queue);
+      for (const { queue, queueGrouped } of this._queueResolving.slice(1)) {
+        const nextQueue = new Set(queue);
+        /** @type { Promise<void>[] } */
+        const queuePromises = [];
+        for (const serviceName of Object.keys(queueGrouped)) {
+          /** @type { Service[] } */
+          // @ts-ignore
+          const services = queueGrouped[serviceName];
+          /** @type { ResolverValue } */
+          // @ts-ignore
+          const resolver = this._resolvers.get(serviceName);
+          queuePromises.push(this._resolve({ resolver, services, variable }));
+        }
+
+        await Promise.all(queuePromises);
+
+        if (nextQueue.size === 0) {
+          break;
+        }
+        currentQueue = nextQueue;
+      }
+    }
+
+    console.log(variable);
+  }
+
+  /**
+   * @param { object } props
+   * @param { ResolverValue } props.resolver
+   * @param { Service[] } props.services
+   * @param { Record<string, ResolverAvailableTypes> } props.variable
+   * @private
+   */
+  async _resolve({ resolver, services, variable }) {
+    const { callback, argsModel } = resolver;
+    try {
+      const result = await callback(
+        services.map((context) => {
+          /** @type { ResolverArgs } */
+          const args = {};
+          for (const dependency of context.dependencies) {
+            args[dependency.name] = variable[dependency.variableName];
+          }
+          return args;
+        })
+      );
+      for (let i = 0; i < services.length; ++i) {
+        const record = result[i];
+        /** @type { Record<string, string> } */
+        // @ts-ignore
+        const model = this._serviceModels.get(services[i].key);
+        for (const from of Object.keys(model)) {
+          const to = model[from];
+          variable[to] = record[from];
+        }
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  }
+}
+
 class Resolver {
   /**
    * @typedef { Record<string, ('string' | 'string[]')[]> } ArgsModel
@@ -305,7 +426,8 @@ class Resolver {
    * @param { ResolverCallback } resolver
    * @param { ArgsModel } [argsModel={}]
    */
-  registResolver(name, resolver, argsModel = {}) {
+  registService(name, resolver, argsModel = {}) {
+    this._validateSystemResolver(name);
     this._resolvers.set(name, {
       callback: resolver,
       argsModel,
@@ -314,10 +436,21 @@ class Resolver {
 
   /**
    * @param { string } name
+   * @private
+   */
+  _isSystemResolverName(name) {
+    return name === "Arguments";
+  }
+
+  /**
+   * @param { string } name
+   * @private
    */
   _validateSystemResolver(name) {
-    if (name === "Arguments") {
-      throw new Error();
+    if (this._isSystemResolverName(name)) {
+      throw new TemplaterError(
+        `service "${name}" system and cannot be registered`
+      );
     }
   }
 
@@ -333,7 +466,44 @@ class Resolver {
       childrenServices,
     });
 
-    return queueResolving;
+    const queueResolvingGrouped = queueResolving.map((queue) => {
+      const queueGrouped = groupByField(queue, "name");
+      return {
+        queue,
+        queueGrouped,
+      };
+    });
+
+    /** @type { Record<string, ResolverAvailableTypes> } */
+    const variableBase = {};
+    /** @type { Map<string, Record<string, string>> } */
+    const serviceModels = new Map();
+    for (const [key, variable] of context.variables.entries()) {
+      if (variable.type === "ref") {
+        /** @type { Record<string, string> } */
+        const model = serviceModels.get(variable.service) || {};
+        serviceModels.set(variable.service, model);
+        model[variable.fieldKey] = key;
+      } else {
+        variableBase[key] = variable.constant;
+      }
+    }
+
+    const executor = new ResolverExecutor({
+      context,
+      variableBase,
+      serviceModels,
+      resolvers: this._resolvers,
+      queueResolving: queueResolvingGrouped,
+    });
+
+    /**
+     * @param { Context } [context=undefined]
+     */
+    const resolver = (context) => {
+      return executor.execute(context);
+    };
+    return resolver;
   }
 
   /**
@@ -342,7 +512,7 @@ class Resolver {
    */
   _validateAvailabilityServices(services) {
     for (const { name } of services.values()) {
-      if (!this._resolvers.has(name)) {
+      if (!this._resolvers.has(name) && !this._isSystemResolverName(name)) {
         throw new TemplaterError(`service "${name}" has no implementation`);
       }
     }
@@ -458,8 +628,41 @@ class Resolver {
       }
       services = nextServices;
     }
-    return queueResolving;
+    return this._filterSystemResolver(queueResolving);
   }
+
+  /**
+   * @param { Service[][] } services
+   * @private
+   */
+  _filterSystemResolver(services) {
+    return services
+      .map((queue) => {
+        return queue.filter(({ name }) => !this._isSystemResolverName(name));
+      })
+      .filter((queue) => {
+        return queue.length > 0;
+      });
+  }
+}
+
+/**
+ * @template { Record<string | number, any> } T
+ * @param { T[] } arr
+ * @param { keyof T } field
+ */
+function groupByField(arr, field) {
+  /** @type { Record<keyof T, T[]>} */
+  // @ts-ignore
+  const result = {};
+  for (const item of arr) {
+    if (item[field] in result) {
+      result[item[field]].push(item);
+    } else {
+      result[item[field]] = [item];
+    }
+  }
+  return result;
 }
 
 module.exports = {

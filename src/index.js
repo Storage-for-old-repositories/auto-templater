@@ -20,6 +20,7 @@ const template = `
     name = $user_name; \
   }
 
+  $tag = tag <- @incident
   $incident_name = name <- @incident
   $incident_description = description <- @incident_description
   $message = 'hello 234234'
@@ -45,22 +46,33 @@ const template = `
 const result = parser(template);
 const resolver = new Resolver();
 
-resolver.registResolver("Al", (r) => {
-  return [""];
+resolver.registService("Al", (r) => {
+  return r.map((x, i) => {
+    return {
+      world: `Al [world ${i}]`,
+    };
+  });
 });
 
-resolver.registResolver("Arguments", (r) => {
-  return [""];
+resolver.registService("IncidentById", (r) => {
+  return r.map((x, i) => {
+    return {
+      tag: `IncidentById tag ${i}`,
+      name: `IncidentById name ${i}`,
+      description: `IncidentById description ${i}`,
+    };
+  });
 });
 
-resolver.registResolver("IncidentById", (r) => {
-  return [""];
+resolver.registService("Potate", (r) => {
+  return r.map((x, i) => {
+    return {
+      work: `Potate ${i}`,
+    };
+  });
 });
 
-resolver.registResolver("Potate", (r) => {
-  return [""];
-});
-
-resolver.buildResolver(result.resolverContext);
+const res = resolver.buildResolver(result.resolverContext);
+res();
 
 // console.log(result);
