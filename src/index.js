@@ -1,4 +1,4 @@
-const { parser, Resolver } = require("./templater");
+const { parser, createResolver } = require("./templater");
 
 const template = `
 #data         
@@ -43,7 +43,15 @@ const template = `
 //
 
 #view
-<Root>
+<html>
+ <body>
+  <h1>{{incident_name}}</h1>
+ </body>
+</html>
+`;
+
+{
+  /* <Root>
 <Mail>
   <H1>{$user_name}</H1>
   <H1>{$user_incident_id}</H1>
@@ -51,20 +59,20 @@ const template = `
   <H1>{$incident_description}</H1>
   <H1>{$message}</H1>
 </Mail>
-</Root>
-`;
+</Root> */
+}
 
-const result = parser(template);
-const resolver = new Resolver();
+const resolver = createResolver();
 
-const consoleTimeout = (time, message) =>
-  new Promise((res) => {
-    setTimeout(() => console.log(message, res()), time);
-  });
+// const timeolog = (time, message) =>
+//   new Promise((res) => {
+//     setTimeout(() => console.log(message, res()), time);
+//   });
 
 resolver.registService("Al", async (r) => {
   // throw new Error()
-  await consoleTimeout(1000, "Al");
+  // console.log(r);
+  // await timeolog(1000, "Al");
   return r.map((x, i) => {
     return {
       world: `Al [world ${i}]`,
@@ -73,7 +81,7 @@ resolver.registService("Al", async (r) => {
 });
 
 resolver.registService("IncidentById", async (r) => {
-  await consoleTimeout(1000, "IncidentById");
+  // await timeolog(1000, "IncidentById");
   // throw new Error();
   return r.map((x, i) => {
     return {
@@ -86,7 +94,7 @@ resolver.registService("IncidentById", async (r) => {
 
 resolver.registService("Potate", async (r) => {
   // throw new Error();
-  await consoleTimeout(1000, "Potate");
+  // await timeolog(1000, "Potate");
   return r.map((x, i) => {
     return {
       work: `Potate ${i}`,
@@ -95,7 +103,7 @@ resolver.registService("Potate", async (r) => {
 });
 
 resolver.registService("Jira", async (r) => {
-  await consoleTimeout(1000, "Jira");
+  // await timeolog(1000, "Jira");
   return r.map((x, i) => {
     return {
       case: `case ${i}`,
@@ -104,7 +112,7 @@ resolver.registService("Jira", async (r) => {
 });
 
 resolver.registService("Left", async (r) => {
-  await consoleTimeout(1000, "Left");
+  // await timeolog(1000, "Left");
   return r.map((x, i) => {
     return {
       left: `It is left variable ${i}`,
@@ -114,7 +122,7 @@ resolver.registService("Left", async (r) => {
 
 resolver.registService("Right", async (r) => {
   // throw new Error()
-  await consoleTimeout(1000, "Right");
+  // await timeolog(1000, "Right");
   return r.map((x, i) => {
     return {
       right: `It is right variable ${i}`,
@@ -122,7 +130,5 @@ resolver.registService("Right", async (r) => {
   });
 });
 
-const res = resolver.buildResolver(result.resolverContext);
-res().then((r) => console.log(r));
-
-// console.log(result);
+const renderer = resolver.buildRenderer(template);
+renderer().then((message) => console.log(message));

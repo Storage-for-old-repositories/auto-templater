@@ -10,6 +10,7 @@
 
 class TemplaterError extends Error {}
 class SystemError extends Error {}
+class TypingError extends Error {}
 
 const TAG_DATA = "#data";
 const TAG_VIEW = "#view";
@@ -352,8 +353,8 @@ class ResolverExecutor {
       let currentQueue = new Set(this._queueResolving[0].queue);
       for (let i = 1; i <= this._queueResolving.length; ++i) {
         const { queueGrouped } = this._queueResolving[i - 1];
-        const { queue } = this._queueResolving[i] || { queue: [] };
-        const nextQueue = new Set(queue);
+        const { queue } = this._queueResolving[i] || {};
+        const nextQueue = new Set(queue || []);
 
         /** @type { Promise<void>[] } */
         const queuePromises = [];
@@ -375,6 +376,9 @@ class ResolverExecutor {
             .catch((error) => {
               if (error instanceof SystemError) {
                 return;
+              }
+              if (error instanceof TypingError) {
+                throw error;
               }
               for (const service of services) {
                 const childServices = this._childrenServices.get(service.key);
@@ -406,12 +410,44 @@ class ResolverExecutor {
    */
   async _resolve({ resolver, services, variable }) {
     const { callback, argsModel } = resolver;
+
+    /** @param { unknown } value */
+    const isString = (value) => typeof value === "string";
+    /** @param { unknown } value */
+    const isArrayStrings = (value) =>
+      Array.isArray(value) && value.every(isString);
+
+    const validator = argsModel
+      ? (/** @type {any} */ record) => {
+          for (const key of Object.keys(argsModel)) {
+            const types = new Set(argsModel[key]);
+            let result = false;
+            if (types.has("string")) {
+              result = result || isString(record[key]);
+            } else if (types.has("string[]")) {
+              result = result || isArrayStrings(record[key]);
+            }
+            if (!result) {
+              const arrayTypes = [...types.values()];
+              throw new TypingError(
+                `field ${
+                  services[0].name
+                }.${key} does not match types - "${arrayTypes.join("; ")}"`
+              );
+            }
+          }
+        }
+      : null;
+
     const result = await callback(
       services.map((context) => {
         /** @type { ResolverArgs } */
         const args = {};
         for (const dependency of context.dependencies) {
           args[dependency.name] = variable[dependency.variableName];
+        }
+        if (validator) {
+          validator(args);
         }
         return args;
       })
@@ -427,11 +463,6 @@ class ResolverExecutor {
       for (const from of Object.keys(model)) {
         const to = model[from];
         updateVarialbes[to] = record[from];
-
-        const type = argsModel?.[from];
-        if (type !== undefined) {
-          console.log(updateVarialbes[to], type);
-        }
       }
     }
     return updateVarialbes;
@@ -448,21 +479,30 @@ class Resolver {
    * @property { ResolverCallback } callback
    */
 
-  constructor() {
-    /** @type { Map<string, ResolverValue> } */
-    this._resolvers = new Map(
-      SYSTEM_SERVICE.map((name) => {
-        return [
-          name,
-          {
-            argsModel: {},
-            callback: () => {
-              throw new SystemError();
+  /**
+   * @param { Map<string, ResolverValue> } resolvers
+   */
+  constructor(resolvers) {
+    this._resolvers = resolvers;
+  }
+
+  static create() {
+    const resolver = new Resolver(
+      new Map(
+        SYSTEM_SERVICE.map((name) => {
+          return [
+            name,
+            {
+              argsModel: {},
+              callback: () => {
+                throw new SystemError();
+              },
             },
-          },
-        ];
-      })
+          ];
+        })
+      )
     );
+    return resolver;
   }
 
   /**
@@ -498,7 +538,9 @@ class Resolver {
     }
   }
 
-  /** @param { ResolverContext } context */
+  /**
+   * @param { ResolverContext } context
+   */
   buildResolver(context) {
     this._validateAvailabilityServices(context.services);
     this._validateServiceProvideNames(context.services);
@@ -549,6 +591,44 @@ class Resolver {
       return executor.execute(context);
     };
     return resolver;
+  }
+
+  /**
+   * @typedef RendererArgument
+   * @type { object }
+   * @property { string[] } lines
+   * @property { string } text
+   * @property { string | undefined } version
+   * @property { Record<string, ResolverAvailableTypes> } record
+   */
+
+  /**
+   * @param { string } template
+   * @param { (props: RendererArgument) => string } [messageBuilder=undefined]
+   */
+  buildRenderer(template, messageBuilder) {
+    const parsedData = Parser.parse(template);
+    const resolver = this.buildResolver(parsedData.resolverContext);
+    const builder =
+      messageBuilder ??
+      (({ text, record }) => {
+        // @ts-ignore
+        return text.replace(/\{\{([a-z_]+)\}\}/g, (_, key) => {
+          return record[key];
+        });
+      });
+    /**
+     * @param { Context | undefined } [context=undefined]
+     */
+    return async (context = {}) => {
+      const record = await resolver(context);
+      return builder({
+        lines: parsedData.viewLines,
+        text: parsedData.viewLines.join("\n"),
+        version: parsedData.viewVersion,
+        record,
+      });
+    };
   }
 
   /**
@@ -696,6 +776,7 @@ function groupByField(arr, field) {
 }
 
 module.exports = {
-  Resolver,
   parser: Parser.parse,
+  createResolver: Resolver.create,
+  TemplaterError,
 };
