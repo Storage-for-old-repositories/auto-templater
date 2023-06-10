@@ -9,6 +9,7 @@
  */
 
 class TemplaterError extends Error {}
+class SystemError extends Error {}
 
 const TAG_DATA = "#data";
 const TAG_VIEW = "#view";
@@ -31,6 +32,8 @@ const REGEXP_INTERNAL_IDENTIFIER = /^[@$]internal_/;
 const REGEXP_VARIABLE = /^([a-z][a-z_]*) *<- *(@[a-z][a-z_]*)*$/;
 const REGEXP_SERVICE =
   /^([A-Z][a-zA-Z]+) *({ *([a-z][a-z_]* *= *\$[a-z][a-z_]*; *)+ *})?$/;
+
+const SYSTEM_SERVICE = ["Arguments"];
 
 class ResolverContext {
   constructor() {
@@ -315,6 +318,7 @@ class ResolverExecutor {
    * @param { Record<string, ResolverAvailableTypes> } props.variableBase
    * @param { Map<string, Record<string, string>> } props.serviceModels
    * @param { QueueResolving[] } props.queueResolving
+   * @param { Map<string, Map<string, Service>> } props.childrenServices
    */
   constructor({
     resolvers,
@@ -322,12 +326,14 @@ class ResolverExecutor {
     variableBase,
     serviceModels,
     queueResolving,
+    childrenServices,
   }) {
     this._resolvers = resolvers;
     this._context = context;
     this._variableBase = variableBase;
     this._serviceModels = serviceModels;
     this._queueResolving = queueResolving;
+    this._childrenServices = childrenServices;
   }
 
   /**
@@ -344,30 +350,51 @@ class ResolverExecutor {
 
     if (this._queueResolving.length > 0) {
       let currentQueue = new Set(this._queueResolving[0].queue);
-      for (const { queue, queueGrouped } of this._queueResolving.slice(1)) {
+      for (let i = 1; i <= this._queueResolving.length; ++i) {
+        const { queueGrouped } = this._queueResolving[i - 1];
+        const { queue } = this._queueResolving[i] || { queue: [] };
         const nextQueue = new Set(queue);
+
         /** @type { Promise<void>[] } */
         const queuePromises = [];
+
         for (const serviceName of Object.keys(queueGrouped)) {
           /** @type { Service[] } */
           // @ts-ignore
-          const services = queueGrouped[serviceName];
+          const services = queueGrouped[serviceName].filter((service) =>
+            currentQueue.has(service)
+          );
+
           /** @type { ResolverValue } */
           // @ts-ignore
           const resolver = this._resolvers.get(serviceName);
-          queuePromises.push(this._resolve({ resolver, services, variable }));
+          const handler = this._resolve({ resolver, services, variable })
+            .then((result) => {
+              Object.assign(variable, result);
+            })
+            .catch((error) => {
+              if (error instanceof SystemError) {
+                return;
+              }
+              for (const service of services) {
+                const childServices = this._childrenServices.get(service.key);
+                if (childServices) {
+                  for (const service of childServices.values()) {
+                    nextQueue.delete(service);
+                  }
+                }
+              }
+            });
+          queuePromises.push(handler);
         }
-
         await Promise.all(queuePromises);
-
         if (nextQueue.size === 0) {
           break;
         }
         currentQueue = nextQueue;
       }
     }
-
-    console.log(variable);
+    return variable;
   }
 
   /**
@@ -379,30 +406,35 @@ class ResolverExecutor {
    */
   async _resolve({ resolver, services, variable }) {
     const { callback, argsModel } = resolver;
-    try {
-      const result = await callback(
-        services.map((context) => {
-          /** @type { ResolverArgs } */
-          const args = {};
-          for (const dependency of context.dependencies) {
-            args[dependency.name] = variable[dependency.variableName];
-          }
-          return args;
-        })
-      );
-      for (let i = 0; i < services.length; ++i) {
-        const record = result[i];
-        /** @type { Record<string, string> } */
-        // @ts-ignore
-        const model = this._serviceModels.get(services[i].key);
-        for (const from of Object.keys(model)) {
-          const to = model[from];
-          variable[to] = record[from];
+    const result = await callback(
+      services.map((context) => {
+        /** @type { ResolverArgs } */
+        const args = {};
+        for (const dependency of context.dependencies) {
+          args[dependency.name] = variable[dependency.variableName];
+        }
+        return args;
+      })
+    );
+
+    /** @type { Record<string, ResolverAvailableTypes> } */
+    const updateVarialbes = {};
+    for (let i = 0; i < services.length; ++i) {
+      const record = result[i];
+      /** @type { Record<string, string> } */
+      // @ts-ignore
+      const model = this._serviceModels.get(services[i].key);
+      for (const from of Object.keys(model)) {
+        const to = model[from];
+        updateVarialbes[to] = record[from];
+
+        const type = argsModel?.[from];
+        if (type !== undefined) {
+          console.log(updateVarialbes[to], type);
         }
       }
-    } catch (error) {
-      console.log(error);
     }
+    return updateVarialbes;
   }
 }
 
@@ -418,7 +450,19 @@ class Resolver {
 
   constructor() {
     /** @type { Map<string, ResolverValue> } */
-    this._resolvers = new Map();
+    this._resolvers = new Map(
+      SYSTEM_SERVICE.map((name) => {
+        return [
+          name,
+          {
+            argsModel: {},
+            callback: () => {
+              throw new SystemError();
+            },
+          },
+        ];
+      })
+    );
   }
 
   /**
@@ -439,7 +483,7 @@ class Resolver {
    * @private
    */
   _isSystemResolverName(name) {
-    return name === "Arguments";
+    return !!SYSTEM_SERVICE.find((sys) => sys === name);
   }
 
   /**
@@ -495,6 +539,7 @@ class Resolver {
       serviceModels,
       resolvers: this._resolvers,
       queueResolving: queueResolvingGrouped,
+      childrenServices,
     });
 
     /**
@@ -517,7 +562,6 @@ class Resolver {
       }
     }
   }
-
   /**
    * @param { Map<string, Service> } services
    * @private
@@ -536,7 +580,7 @@ class Resolver {
         const uuid = `${key}.${arg}`;
         if (!set.has(uuid)) {
           throw new TemplaterError(
-            `unknown argument "${arg}" in service "${key}"`
+            `missing required parameter "${arg}" in service "${key}"`
           );
         }
         set.add(`${key}.${arg}`);
@@ -628,21 +672,7 @@ class Resolver {
       }
       services = nextServices;
     }
-    return this._filterSystemResolver(queueResolving);
-  }
-
-  /**
-   * @param { Service[][] } services
-   * @private
-   */
-  _filterSystemResolver(services) {
-    return services
-      .map((queue) => {
-        return queue.filter(({ name }) => !this._isSystemResolverName(name));
-      })
-      .filter((queue) => {
-        return queue.length > 0;
-      });
+    return queueResolving;
   }
 }
 

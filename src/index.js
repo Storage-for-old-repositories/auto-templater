@@ -20,6 +20,11 @@ const template = `
     name = $user_name; \
   }
 
+  @left = Left { id = $user_name; }
+  @right = Right { id = $user_name; }
+  $left = left <- @left
+  $right = right <- @right
+
   $tag = tag <- @incident
   $incident_name = name <- @incident
   $incident_description = description <- @incident_description
@@ -28,6 +33,12 @@ const template = `
   @potato = Potate { a = $incident_name; b = $incident_description; }
 
   $work = work <- @potato
+
+  @jira = Jira { dep = $work; }
+  @pot = Potate { dep = $work; }
+
+  $valure = case <- @jira
+  $valure_tow = case <- @pot
 
 //
 
@@ -46,7 +57,14 @@ const template = `
 const result = parser(template);
 const resolver = new Resolver();
 
-resolver.registService("Al", (r) => {
+const consoleTimeout = (time, message) =>
+  new Promise((res) => {
+    setTimeout(() => console.log(message, res()), time);
+  });
+
+resolver.registService("Al", async (r) => {
+  // throw new Error()
+  await consoleTimeout(1000, "Al");
   return r.map((x, i) => {
     return {
       world: `Al [world ${i}]`,
@@ -54,7 +72,9 @@ resolver.registService("Al", (r) => {
   });
 });
 
-resolver.registService("IncidentById", (r) => {
+resolver.registService("IncidentById", async (r) => {
+  await consoleTimeout(1000, "IncidentById");
+  // throw new Error();
   return r.map((x, i) => {
     return {
       tag: `IncidentById tag ${i}`,
@@ -64,7 +84,9 @@ resolver.registService("IncidentById", (r) => {
   });
 });
 
-resolver.registService("Potate", (r) => {
+resolver.registService("Potate", async (r) => {
+  // throw new Error();
+  await consoleTimeout(1000, "Potate");
   return r.map((x, i) => {
     return {
       work: `Potate ${i}`,
@@ -72,7 +94,35 @@ resolver.registService("Potate", (r) => {
   });
 });
 
+resolver.registService("Jira", async (r) => {
+  await consoleTimeout(1000, "Jira");
+  return r.map((x, i) => {
+    return {
+      case: `case ${i}`,
+    };
+  });
+});
+
+resolver.registService("Left", async (r) => {
+  await consoleTimeout(1000, "Left");
+  return r.map((x, i) => {
+    return {
+      left: `It is left variable ${i}`,
+    };
+  });
+});
+
+resolver.registService("Right", async (r) => {
+  // throw new Error()
+  await consoleTimeout(1000, "Right");
+  return r.map((x, i) => {
+    return {
+      right: `It is right variable ${i}`,
+    };
+  });
+});
+
 const res = resolver.buildResolver(result.resolverContext);
-res();
+res().then((r) => console.log(r));
 
 // console.log(result);
