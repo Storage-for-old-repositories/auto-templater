@@ -312,6 +312,15 @@ class Resolver {
     });
   }
 
+  /**
+   * @param { string } name
+   */
+  _validateSystemResolver(name) {
+    if (name === "Arguments") {
+      throw new Error();
+    }
+  }
+
   /** @param { ResolverContext } context */
   buildResolver(context) {
     this._validateAvailabilityServices(context.services);
