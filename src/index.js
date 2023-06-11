@@ -8,13 +8,24 @@ const template = `
   $s = world <- @uno
 
   $huba = $s
+  
 
   @arguments = Arguments { s = $s; }
+
+  $check_servcie_arguments = value <- @arguments
+
+  $value = 'hello \
+  world'
 
   $user_name = name <- @arguments
   $user_incident_id = user_incident_id <- @arguments
 
   $incident_description_id = 'SD000000'
+
+  $muli_text = '\
+    hello \
+    world \
+  '
 
   @incident = IncidentById { id = $user_incident_id;  name = $user_name; }
   @incident_description = IncidentById { \
@@ -52,6 +63,9 @@ const template = `
  <body>
   <h1>{{incident_name}}</h1>
   <P>{{huba}}</P>
+  <Value>{{value}}</Value>
+  <Check>{{check_servcie_arguments}}</Check>
+  {{muli_text}}
  </body>
 </html>
 `;
@@ -64,6 +78,7 @@ const template = `
   <H1>{$incident_name}</H1>
   <H1>{$incident_description}</H1>
   <H1>{$message}</H1>
+  
 </Mail>
 </Root> */
 }
@@ -136,5 +151,9 @@ resolver.registService("Right", async (r) => {
   });
 });
 
-const renderer = resolver.buildRenderer(template);
-renderer(["title", 'body_html']).then((message) => console.log(message));
+const renderer = resolver.buildRenderer();
+renderer(template, ["title", "body_html"], {
+  args: {
+    check_servcie_arguments: "it is work",
+  },
+}).then((message) => console.log(message));

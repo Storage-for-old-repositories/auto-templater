@@ -21,8 +21,8 @@ const SERVICE_CHAR = "@";
 const REGEXP_LINE_COMMENT = /^[ \t]*\/\//;
 const REGEXP_LINE_EMPTY = /^[ \t]*$/;
 const REGEXP_NEW_LINE = /\r?\n/;
-const REGEXP_STRING_LITERAL = /^'.+'$/;
-const REGEXP_LINE_CARRY = /\\\s+$/;
+const REGEXP_STRING_LITERAL = /^'.*'$/;
+const REGEXP_LINE_CARRY = /\\\s*$/;
 
 const REGEXP_HEAD_DATA = /^#data\s*$/;
 const REGEXP_HEAD_VIEW = /^#view\(([a-z][a-z_]+)\)(\[([a-z][a-z_]+)\])?\s*$/;
@@ -671,12 +671,9 @@ class Resolver {
    */
 
   /**
-   * @param { string } template
    * @param { (props: RendererArgument) => string } [customRender=undefined]
    */
-  buildRenderer(template, customRender) {
-    const parsedData = Parser.parse(template);
-    const resolver = this.buildResolver(parsedData.resolverContext);
+  buildRenderer(customRender) {
     const render =
       customRender ??
       (({ text, record }) => {
@@ -686,10 +683,13 @@ class Resolver {
         });
       });
     /**
+     * @param { string } template
      * @param { string[] } views
      * @param { Context | undefined } [context=undefined]
      */
-    return async (views, context = {}) => {
+    return async (template, views, context = {}) => {
+      const parsedData = Parser.parse(template);
+      const resolver = this.buildResolver(parsedData.resolverContext);
       const record = await resolver(context);
       /** @type { Record<string, string> } */
       const rendered = {};
