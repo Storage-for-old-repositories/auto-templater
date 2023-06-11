@@ -9,8 +9,6 @@
  */
 
 class TemplaterError extends Error {}
-class SystemError extends Error {}
-class TypingError extends Error {}
 
 const TAG_DATA = "#data";
 const TAG_VIEW = "#view";
@@ -404,6 +402,8 @@ class ResolverExecutor {
     this._serviceModels = serviceModels;
     this._queueResolving = queueResolving;
     this._childrenServices = childrenServices;
+    /** @type { Record<string, ResolverAvailableTypes> } */
+    this.executeArgumentsServerVariables = {};
   }
 
   /**
@@ -417,6 +417,8 @@ class ResolverExecutor {
       ...this._variableBase,
       ...args,
     };
+
+    this.executeArgumentsServerVariables = args;
 
     if (this._queueResolving.length > 0) {
       let currentQueue = new Set(this._queueResolving[0].queue);
@@ -443,11 +445,8 @@ class ResolverExecutor {
               Object.assign(variable, result);
             })
             .catch((error) => {
-              if (error instanceof TypingError) {
+              if (error instanceof TemplaterError) {
                 throw error;
-              }
-              if (error instanceof SystemError) {
-                return;
               }
               for (const service of services) {
                 const childServices = this._childrenServices.get(service.key);
@@ -498,7 +497,7 @@ class ResolverExecutor {
             }
             if (!result) {
               const arrayTypes = [...types.values()];
-              throw new TypingError(
+              throw new TemplaterError(
                 `field ${
                   services[0].name
                 }.${key} does not match types - "${arrayTypes.join("; ")}"`
@@ -519,8 +518,14 @@ class ResolverExecutor {
           validator(args);
         }
         return args;
-      })
+      }),
+      // @ts-ignore
+      this
     );
+
+    if (result.length !== services.length) {
+      throw new TemplaterError("wrong result from resolver");
+    }
 
     /** @type { Record<string, ResolverAvailableTypes> } */
     const updateVarialbes = {};
@@ -565,8 +570,11 @@ class Resolver {
             name,
             {
               argsModel: {},
-              callback: () => {
-                throw new SystemError();
+              //@ts-ignore
+              callback: (records, executor) => {
+                return records.map(
+                  () => executor.executeArgumentsServerVariables
+                );
               },
             },
           ];
@@ -584,7 +592,7 @@ class Resolver {
   registService(name, resolver, argsModel = {}) {
     this._validateSystemResolver(name);
     this._resolvers.set(name, {
-      callback: resolver,
+      callback: (args) => resolver(args),
       argsModel,
     });
   }
@@ -859,5 +867,5 @@ module.exports = {
   parser: Parser.parse,
   createResolver: Resolver.create,
   TemplaterError,
-  TypingError,
+  TypingError: TemplaterError,
 };

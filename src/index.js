@@ -14,6 +14,7 @@ const template = `
   @arguments = Arguments { s = $s; }
 
   $check_servcie_arguments = value <- @arguments
+  $fff = value <- @arguments
 
   $value = 'hello \
   world'
@@ -73,6 +74,7 @@ const template = `
   syno :: {{syno}}
   s :: {{s}}
   ss :: {{ss}}
+  fff :: {{fff}}
  </body>
 </html>
 `;
@@ -162,5 +164,6 @@ const renderer = resolver.buildRenderer();
 renderer(template, ["title", "body_html"], {
   args: {
     check_servcie_arguments: "it is work",
+    value: 'VALUE'
   },
 }).then((message) => console.log(message));

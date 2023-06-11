@@ -32,5 +32,5 @@ export type ResolverAvailableTypes = string | string[] | undefined;
 export declare type ResolverArgs = Record<string, ResolverAvailableTypes>;
 
 export declare type Resolver = (
-  context: ResolverArgs[]
+  arguments: ResolverArgs[],
 ) => SyncOrAsync<Record<string, ResolverAvailableTypes>[]>;
