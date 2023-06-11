@@ -1,4 +1,4 @@
-export declare type VariableType = "ref" | "type";
+export declare type VariableType = "ref" | "const";
 
 interface InternalVariable<T extends VariableType> {
   type: T;

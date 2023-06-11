@@ -25,7 +25,7 @@ const REGEXP_STRING_LITERAL = /^'.+'$/;
 const REGEXP_LINE_CARRY = /\\\s+$/;
 
 const REGEXP_HEAD_DATA = /^#data\s*$/;
-const REGEXP_HEAD_VIEW = /^#view(\(([a-z_]+)\))?\s*$/;
+const REGEXP_HEAD_VIEW = /^#view\(([a-z][a-z_]+)\)(\[([a-z][a-z_]+)\])?\s*$/;
 
 const REGEXP_IDENTIFIER = /^[@$][a-z][a-z_]*$/;
 const REGEXP_INTERNAL_IDENTIFIER = /^[@$]internal_/;
@@ -85,13 +85,12 @@ class Parser {
   }
 
   parse() {
-    const { data, view } = this.splitRegions();
-    const { version, lines } = this.parseViewRegion(view);
+    const { data, views } = this.splitRegions();
+    const regions = this.parseViewRegions(views);
 
     this.parseDataRegion(data);
     return {
-      viewVersion: version,
-      viewLines: lines,
+      regions,
       resolverContext: this._resolverContext,
     };
   }
@@ -99,35 +98,85 @@ class Parser {
   splitRegions() {
     const lines = this._text.split(REGEXP_NEW_LINE);
 
-    const regionDataIndex = this.findIndexTag(lines, TAG_DATA);
-    const regionViewIndex = this.findIndexTag(lines, TAG_VIEW);
+    const regionDataIndex = this.findIndexDataTag(lines);
+    const regionViewIndexes = this.findIndexesViewTag(lines);
 
-    if (regionDataIndex > regionViewIndex) {
-      throw new TemplaterError("region @view must be after region @data");
+    if (regionDataIndex > regionViewIndexes[0]) {
+      throw new TemplaterError("region #view must be after region #data");
     }
 
-    const data = lines.slice(regionDataIndex, regionViewIndex);
-    const view = lines.slice(regionViewIndex);
-    return { data, view };
+    const data = lines.slice(regionDataIndex, regionViewIndexes[0]);
+    const views = this.splitesViewsRegions(lines, regionViewIndexes);
+
+    return { data, views };
+  }
+
+  /** @param { string[] } lines */
+  findIndexDataTag(lines) {
+    const regionDataIndex = this.findIndexTag(lines, TAG_DATA, 0);
+    if (regionDataIndex == -1) {
+      throw new TemplaterError(`required region ${TAG_DATA} not found`);
+    }
+    const maybeDuplicateRegion = this.findIndexTag(
+      lines,
+      TAG_DATA,
+      regionDataIndex + 1
+    );
+    if (maybeDuplicateRegion > -1) {
+      throw new TemplaterError(`region @${TAG_DATA} announced several times`);
+    }
+    return regionDataIndex;
+  }
+
+  /** @param { string[] } lines */
+  findIndexesViewTag(lines) {
+    const regionViewIndex = this.findIndexTag(lines, TAG_VIEW, 0);
+    if (regionViewIndex == -1) {
+      throw new TemplaterError(`no regions found with the tag ${TAG_VIEW}`);
+    }
+    const indexes = [regionViewIndex];
+    while (true) {
+      const index = this.findIndexTag(
+        lines,
+        TAG_VIEW,
+        indexes[indexes.length - 1] + 1
+      );
+      if (index == -1) {
+        break;
+      }
+      indexes.push(index);
+    }
+    return indexes;
+  }
+
+  /**
+   *
+   * @param { string[] } lines
+   * @param { number[] } indexes
+   */
+  splitesViewsRegions(lines, indexes) {
+    const indexesWithEnd = [...indexes, lines.length];
+    /** @type { string[][] } */
+    const regions = [];
+    for (let i = 1; i < indexesWithEnd.length; ++i) {
+      regions.push(lines.slice(indexesWithEnd[i - 1], indexesWithEnd[i]));
+    }
+    return regions;
   }
 
   /**
    * @param { string[] } lines
    * @param { string } tag
+   * @param { number } [fromIndex=0]
    */
-  findIndexTag(lines, tag) {
-    const index = lines.findIndex((text) => text.startsWith(tag));
-    if (!index) {
-      throw new TemplaterError(`required region @${tag} not found`);
+  findIndexTag(lines, tag, fromIndex = 0) {
+    for (let i = fromIndex; i < lines.length; ++i) {
+      const line = lines[i];
+      if (line.startsWith(tag)) {
+        return i;
+      }
     }
-
-    const maybeDuplicateRegion = lines
-      .slice(index + 1)
-      .find((text) => text.startsWith(tag));
-    if (maybeDuplicateRegion) {
-      throw new TemplaterError(`region @${tag} announced several times`);
-    }
-    return index;
+    return -1;
   }
 
   /**
@@ -279,16 +328,30 @@ class Parser {
   }
 
   /**
+   * @param { string[][] } regions
+   */
+  parseViewRegions(regions) {
+    const parsedRegions = regions.map((region) => this.parseViewRegion(region));
+    /** @type { Record<string, typeof parsedRegions[number]> } */
+    const records = {};
+    for (const parsed of parsedRegions) {
+      records[parsed.name] = parsed;
+    }
+    return records;
+  }
+
+  /**
    * @param { string[] } texts
    */
   parseViewRegion(texts) {
     const [head, ...lines] = texts;
     const match = REGEXP_HEAD_VIEW.exec(head);
-    if (match) {
-      const version = match[2];
-      return { version, lines };
+    if (!match) {
+      throw new TemplaterError(`incorrect title for @view region - "${head}"`);
     }
-    throw new TemplaterError(`incorrect title for @view region - "${head}"`);
+    const name = match[1];
+    const render = match[3] || "default";
+    return { name, render, text: lines.join("\n") };
   }
 }
 
@@ -374,11 +437,11 @@ class ResolverExecutor {
               Object.assign(variable, result);
             })
             .catch((error) => {
-              if (error instanceof SystemError) {
-                return;
-              }
               if (error instanceof TypingError) {
                 throw error;
+              }
+              if (error instanceof SystemError) {
+                return;
               }
               for (const service of services) {
                 const childServices = this._childrenServices.get(service.key);
@@ -596,21 +659,20 @@ class Resolver {
   /**
    * @typedef RendererArgument
    * @type { object }
-   * @property { string[] } lines
+   * @property { string } render
    * @property { string } text
-   * @property { string | undefined } version
    * @property { Record<string, ResolverAvailableTypes> } record
    */
 
   /**
    * @param { string } template
-   * @param { (props: RendererArgument) => string } [messageBuilder=undefined]
+   * @param { (props: RendererArgument) => string } [customRender=undefined]
    */
-  buildRenderer(template, messageBuilder) {
+  buildRenderer(template, customRender) {
     const parsedData = Parser.parse(template);
     const resolver = this.buildResolver(parsedData.resolverContext);
-    const builder =
-      messageBuilder ??
+    const render =
+      customRender ??
       (({ text, record }) => {
         // @ts-ignore
         return text.replace(/\{\{([a-z_]+)\}\}/g, (_, key) => {
@@ -618,16 +680,25 @@ class Resolver {
         });
       });
     /**
+     * @param { string[] } views
      * @param { Context | undefined } [context=undefined]
      */
-    return async (context = {}) => {
+    return async (views, context = {}) => {
       const record = await resolver(context);
-      return builder({
-        lines: parsedData.viewLines,
-        text: parsedData.viewLines.join("\n"),
-        version: parsedData.viewVersion,
-        record,
-      });
+      /** @type { Record<string, string> } */
+      const rendered = {};
+      for (const view of views) {
+        const template = parsedData.regions[view];
+        if (!template) {
+          throw new TemplaterError(`there is no #view named "${view}"`);
+        }
+        rendered[view] = render({
+          render: template.render,
+          text: template.text,
+          record,
+        });
+      }
+      return rendered;
     };
   }
 
@@ -779,4 +850,5 @@ module.exports = {
   parser: Parser.parse,
   createResolver: Resolver.create,
   TemplaterError,
+  TypingError,
 };

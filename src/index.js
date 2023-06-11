@@ -42,7 +42,10 @@ const template = `
 
 //
 
-#view
+#view(title)[default]
+Инцидент {{incident_name}}
+
+#view(body_html)[default]
 <html>
  <body>
   <h1>{{incident_name}}</h1>
@@ -131,4 +134,4 @@ resolver.registService("Right", async (r) => {
 });
 
 const renderer = resolver.buildRenderer(template);
-renderer().then((message) => console.log(message));
+renderer(["title", 'body_html']).then((message) => console.log(message));
