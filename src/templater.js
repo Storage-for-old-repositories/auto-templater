@@ -23,7 +23,7 @@ const REGEXP_STRING_LITERAL = /^'.*'$/;
 const REGEXP_LINE_CARRY = /\\\s*$/;
 
 const REGEXP_HEAD_DATA = /^#data\s*$/;
-const REGEXP_HEAD_VIEW = /^#view\(([a-z][a-z_]+)\)(\[([a-z][a-z_]+)\])?\s*$/;
+const REGEXP_HEAD_VIEW = /^#view\(([a-z][a-z_]+)\)(\[([a-z][a-z_0-9]+)\])?\s*$/;
 
 const REGEXP_IDENTIFIER = /^[@$][a-z][a-z_]*$/;
 const REGEXP_INTERNAL_IDENTIFIER = /^[@$]internal_/;
