@@ -6,6 +6,7 @@ const template = `
 
   @uno = Al { d = $hello; }
   $s = world <- @uno
+  $ss = world <- @uno
 
   $huba = $s
   
@@ -53,6 +54,8 @@ const template = `
   $valure = case <- @jira
   $valure_tow = case <- @pot
 
+  $syno = $incident_name
+
 //
 
 #view(title)[default]
@@ -66,6 +69,10 @@ const template = `
   <Value>{{value}}</Value>
   <Check>{{check_servcie_arguments}}</Check>
   {{muli_text}}
+  incident_name :: {{incident_name}}
+  syno :: {{syno}}
+  s :: {{s}}
+  ss :: {{ss}}
  </body>
 </html>
 `;

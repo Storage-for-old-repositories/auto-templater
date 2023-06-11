@@ -386,7 +386,7 @@ class ResolverExecutor {
    * @param { Map<string, ResolverValue> } props.resolvers
    * @param { ResolverContext } props.context
    * @param { Record<string, ResolverAvailableTypes> } props.variableBase
-   * @param { Map<string, Record<string, string>> } props.serviceModels
+   * @param { Map<string, Record<string, string[]>> } props.serviceModels
    * @param { QueueResolving[] } props.queueResolving
    * @param { Map<string, Map<string, Service>> } props.childrenServices
    */
@@ -526,12 +526,14 @@ class ResolverExecutor {
     const updateVarialbes = {};
     for (let i = 0; i < services.length; ++i) {
       const record = result[i];
-      /** @type { Record<string, string> } */
+      /** @type { Record<string, string[]> } */
       // @ts-ignore
       const model = this._serviceModels.get(services[i].key);
       for (const from of Object.keys(model)) {
-        const to = model[from];
-        updateVarialbes[to] = record[from];
+        const tos = model[from];
+        for (const to of tos) {
+          updateVarialbes[to] = record[from];
+        }
       }
     }
     return updateVarialbes;
@@ -631,14 +633,15 @@ class Resolver {
 
     /** @type { Record<string, ResolverAvailableTypes> } */
     const variableBase = {};
-    /** @type { Map<string, Record<string, string>> } */
+    /** @type { Map<string, Record<string, string[]>> } */
     const serviceModels = new Map();
     for (const [key, variable] of context.variables.entries()) {
       if (variable.type === "ref") {
-        /** @type { Record<string, string> } */
+        /** @type { Record<string, string[]> } */
         const model = serviceModels.get(variable.service) || {};
         serviceModels.set(variable.service, model);
-        model[variable.fieldKey] = key;
+        model[variable.fieldKey] ??= [];
+        model[variable.fieldKey].push(key);
       } else {
         variableBase[key] = variable.constant;
       }
