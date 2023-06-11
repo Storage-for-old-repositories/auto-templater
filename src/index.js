@@ -7,6 +7,8 @@ const template = `
   @uno = Al { d = $hello; }
   $s = world <- @uno
 
+  $huba = $s
+
   @arguments = Arguments { s = $s; }
 
   $user_name = name <- @arguments
@@ -49,6 +51,7 @@ const template = `
 <html>
  <body>
   <h1>{{incident_name}}</h1>
+  <P>{{huba}}</P>
  </body>
 </html>
 `;

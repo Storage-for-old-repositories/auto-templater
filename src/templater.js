@@ -316,6 +316,12 @@ class Parser {
         service: service.slice(1),
       });
     }
+    const aliasVariable = this._resolverContext.variables.get(
+      line.trim().slice(1)
+    );
+    if (aliasVariable) {
+      return this.registVariable(name, aliasVariable);
+    }
     throw new TemplaterError(`invalid variable name "${line}"`);
   }
 
